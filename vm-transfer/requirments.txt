@@ -1,0 +1,3 @@
+cryptography==2.5.0   # Required by symp and not the screipt
+munch==2.5.0
+ipdb==0.13.9
