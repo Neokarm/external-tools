@@ -1,5 +1,5 @@
 Tool for copying zCompute VMs from cluster to cluster (using R7+ DR protection group, or manual volumes)
-
+```
 usage: zvm_transfer.py [-h] [--no-dry-run] [--dry-run] [--vm VM] [--vpc VPC]
                        [--filename FILENAME] [--skip-sg] [--ignore-vm-state]
                        [--ipdb] [--also-mirror-volumes]
@@ -35,6 +35,8 @@ optional arguments:
   --use-cc-passthrough  Access VPSA using CC pass through mode (when VPSA is
                         not directly accessible
   --version             show program's version number and exit
+```
+
 
 * The tools try to recover previous failure - it should be safe to re-run it after a the error was fixed
 (e.g. connectivity to VPSA, wrong network name/security groups, etc)
@@ -65,11 +67,13 @@ In such case the default SG will be attached to all of the vNIC assigned to the 
  Please note that the SRC_PROJECT_ID & DST_PROJECT_ID refer to the project use for login in each cloud while
  SRC_TRANSFER_PROJECT_ID and DST_TRANSFER_PROJECT_ID refer to the migrated VMs projects
 
-4.
-4. The tool support 5 different operations
-  migrate - migrate a single VM according to it name or UUID
+* The tool support 5 different operations
+  * migrate - migrate a single VM according to it name or UUID
   If there are multiple VMs with the same name in the source project you must specify the VM UUID
   You can also specify the VPC name or ID in the project to narrow the filter for VM selection by name
+  * migrate_all - migrate all VMs in a single project
+  * migrate_vpc_vms - migrate all VMs in a single VPC
+  * manage - manage a VPSA volume in zCompute
+  * unmanage - stop managing a VPSA volume in zCompute without deleting the volume
 
 
-4.
