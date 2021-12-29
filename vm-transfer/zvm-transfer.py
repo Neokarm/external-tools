@@ -36,15 +36,16 @@ arguments = None
 vpsa_requesters_cache = dict()
 
 
-def migrate_vm(vm_id_or_name):
+def migrate_vm(vm_id_or_name, vpc_id=None):
     logger.info("vm_id: %s", vm_id_or_name)
 
     src_symp_client = init_src_symp_client()
     vm_list = src_symp_client.vms.list(detailed=True)
     vm = get_vm_by_id(src_symp_client, vm_id_or_name, vm_list)
     if not vm:
-        vm = get_vm_by_name(src_symp_client, vm_id_or_name)
+        vm = get_vm_by_name(src_symp_client, vm_id_or_name, vm_vpc_id=vpc_id, project_id=Config.SRC_TRANSFER_PROJECT_ID)
         if not vm:
+            logger.error("VM %s is not found in source cluster", vm_id_or_name)
             sys.exit(1)
     _migrate_vm(vm)
 
@@ -60,7 +61,8 @@ def _migrate_vm(vm):
                            " - user requested to ignore".format(vm.name, vm_id, vm.status))
 
     dst_symp_client = init_dst_symp_client()
-    dest_vm = get_vm_by_name(dst_symp_client, vm.name)
+    src_symp_client = init_src_symp_client()
+    dest_vm = get_vm_by_name(dst_symp_client, vm.name, vm.vpc_id, project_id=Config.DST_TRANSFER_PROJECT_ID)
     if dest_vm:
         logger.info("VM {} ({}) already exists in destination".format(dest_vm.name, dest_vm.id))
         sys.exit(1)
@@ -83,10 +85,13 @@ def get_vm_by_id(client, vm_id, vm_list=None):
     return filtered_vm_list[0]
 
 
-def get_vm_by_name(client, vm_name, vm_list=None):
+def get_vm_by_name(client, vm_name, vm_vpc_id=None, project_id=None, vm_list=None):
     if vm_list is None:
         vm_list = client.vms.list(detailed=True)
-    filtered_vm_list = [vm for vm in vm_list if vm.name == vm_name]
+    filtered_vm_list = [vm for vm in vm_list
+                        if vm.name == vm_name
+                        and (vm_vpc_id is None or vm.vpc_id == vm_vpc_id)
+                        and vm.project_id == project_id]
     if not filtered_vm_list:
         logger.info("VM with name: %s does not exists", vm_name)
         return None
@@ -123,6 +128,7 @@ def init_dst_symp_client():
 def _validate_vpsa_response(response):
     if response is None:
         logger.debug("Empty VPSA Response")
+        return False
     if response.status_code != 200:
         logger.debug("Response code: %s", response.status_code)
         return False
@@ -203,16 +209,20 @@ def get_vpsa_requester(client, pool_id):
 
 
 def create_networking_map(src_client, dst_client, vm):
-    src_networks = src_client.vpcs.networks.list(project_id=Config.SRC_TRANSFER_PROJECT_ID)
+    src_networks = src_client.vpcs.networks.list(project_id=Config.SRC_TRANSFER_PROJECT_ID, vpc_id=vm.vpc_id)
     src_networks_id_to_name = {network.id: network.name for network in src_networks}
     if len(src_networks) != len(set([network.name for network in src_networks if network.name])):
-        msg = "There are at least two networks with the same name in the source"
+        msg = "There are at least two networks with the same name (or without name) in the source: {}".format(
+            [network['name'] for network in src_networks]
+        )
         logger.info(msg)
         raise Exception(msg)
     dst_networks = dst_client.vpcs.networks.list(project_id=Config.DST_TRANSFER_PROJECT_ID)
     dst_networks_name_to_id = {network.name: network.id for network in dst_networks if network.name}
     if len(dst_networks) != len(dst_networks_name_to_id):
-        msg = "There are at least two networks with the same name in the destinations"
+        msg = "There are at least two networks with the same name (or without name) in the destinations: {}".format(
+            [network['name'] for network in dst_networks]
+        )
         logger.info(msg)
         raise Exception(msg)
 
@@ -307,7 +317,9 @@ def get_vpsa_volume_by_name(vpsa_requester, display_name, must_succeed=False):
     for _ in xrange(MAX_VPSA_REQUEST_LOOPS):
         response = vpsa_requester('GET', '/api/volumes.json?display_name={name}'.format(name=display_name))
         if _validate_vpsa_response(response):
-            break
+            count = response.json().get('response', {}).get('count', 0)
+            if count > 0:
+                break
         time.sleep(10)
     if not _validate_vpsa_response(response):
         msg = "Expected volume {name} not found after mirror job break".format(name=display_name)
@@ -331,6 +343,18 @@ def get_vpsa_volume_by_name(vpsa_requester, display_name, must_succeed=False):
     return volume
 
 
+def update_vpsa_volume_dedup_compression(vpsa_volume):
+    logger.info("Updating volume %s (%s) to use dedup and compression", vpsa_volume['display_name'],
+                vpsa_volume['name'])
+    vpsa_requester = get_vpsa_requester(client, Config.DST_POOL_ID)
+    api_data = json.dumps({'dedupe': 'YES', 'compress':'YES'})
+    response = vpsa_requester('PUT', '/api/volumes/{id}.json'.format(id=vpsa_volume['name']),
+                              data=api_data)
+    if not _validate_vpsa_response(response):
+        logger.warning("Failed to update dedup & compression for volume: %s (%s)",
+                       vpsa_volume['display_name'], vpsa_volume['name'])
+
+
 def break_mirror_and_refresh_volumes(client, mirror_job, volume_id):
     logger.info("Breaking mirror job: %s and renaming to %s", mirror_job['job_display_name'],
                 VPSA_VOLUME_TEMPLATE.format(volume_id))
@@ -344,6 +368,8 @@ def break_mirror_and_refresh_volumes(client, mirror_job, volume_id):
     response = vpsa_requester('POST', '/api/mirror_jobs/{id}/break.json'.format(id=mirror_job['job_name']))
     response.raise_for_status()
     volume = get_vpsa_volume_by_name(vpsa_requester, expected_volume_name, must_succeed=True)
+    # update volume compression and dedupe
+    update_vpsa_volume_dedup_compression(volume)
     return rename_mirror_job_volume_and_refresh_volumes(client, volume['display_name'], volume_id)
 
 
@@ -419,12 +445,13 @@ def check_manage_volume(manageable_volumes, existing_volumes, mirror_jobs, volum
     if ignore_exists:
         existing_vol = [v for v in existing_volumes if v.id == volume_id]
         if existing_vol:
-            logger.info("Requested volume already exists - skipping")
+            logger.info("Requested volume %s already exists - skipping", volume_id)
             return None
     if volume_to_manage:
         logger.info("Found volume to manage = %s", volume_to_manage)
         volume_to_manage = volume_to_manage[0]
     elif mirror_jobs is not None:
+        logger.info("No volume %s to manage - looking for a mirror job", VPSA_VOLUME_TEMPLATE.format(volume_id))
         volume_to_manage = [volume for volume in manageable_volumes if
                             volume.reference.name.startswith(VPSA_MIRROR_VOLUME_TEMPLATE.format(volume_id))]
         valid_mirror_jobs = [mirror_job for mirror_job in mirror_jobs if
@@ -443,10 +470,12 @@ def check_manage_volume(manageable_volumes, existing_volumes, mirror_jobs, volum
                 logger.info(msg)
                 raise Exception(msg)
         else:
-            msg = "Found a mirrored volume to manage = %s" % volume_to_manage[0].reference.name
-            logger.info(msg)
-            volume_to_manage = volume_to_manage[0]
-            return volume_to_manage
+            logging.info("No mirrored job for volume %s looking for mirror volumes", volume_id)
+            if volume_to_manage:
+                msg = "Found a mirrored volume to manage = %s" % volume_to_manage[0].reference.name
+                logger.info(msg)
+                volume_to_manage = volume_to_manage[0]
+                return volume_to_manage
     else:
         msg = "Did not find volume to manage = %s" % volume_id
         logger.info(msg)
@@ -578,18 +607,25 @@ def init_logger(vm_id):
     logger.info("Logger initialized")
 
 
-def migrate_project_vm():
+def migrate_vpc_vms(vpc_id):
     src_client = init_src_symp_client()
     vm_list = src_client.vms.list(detailed=True)
     filtered_vm_list = [vm for vm in vm_list
                         if vm.project_id == Config.SRC_TRANSFER_PROJECT_ID
+                        and vm.vpc_id == vpc_id
                         and vm.managing_resource.resource_id is None]
     logger.info("The following VMs will be transferred:\n%s", pformat({vm.id: vm.name for vm in filtered_vm_list}))
+    ans = raw_input("Continue [Y/n]? ")
+    if ans != 'Y':
+        sys.exit(1)
     for vm in filtered_vm_list:
         try:
-            _migrate_vm(vm)
+            logger.info("migrate VM: %s %s", vm.name, vm.id)
+            ans = raw_input("Continue [Y/n]? ")
+            if ans == 'Y':
+                _migrate_vm(vm)
         except Exception as exc:
-            logger.info("Failed to migrate VM: %s with error %s", vm.name, vm.id, exc)
+            logger.exception("Failed to migrate VM: %s with error %s", vm.name, vm.id)
             ans = raw_input("Continue [Y/n]? ")
             if ans != 'Y':
                 sys.exit(str(exc))
@@ -605,10 +641,10 @@ def get_to_ipdb():
 def parse_arguments():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("op", choices=['migrate', 'migrate_all', 'manage', 'unmanage'],
+    parser.add_argument("op", choices=['migrate', 'migrate_all', 'migrate_vpc_vms', 'manage', 'unmanage'],
                         help="Operation to perform. one of: "
                              "migrate (migrate a VM), "
-                             "migrate_project_vms (migrate all user VMs in a project), "
+                             "migrate_vpc_vms (migrate all user VMs in a VPC), "
                              "migrate_all (migrate a list of VMs - from a filename), "
                              "manage (manage a single volume), "
                              "unmanage (unmanage a single volume)")
@@ -618,6 +654,7 @@ def parse_arguments():
                         help="Run in dry run mode (Default)", required=False)
     parser.set_defaults(dry_run=Config.DEFAULT_IS_DRY_RUN)
     parser.add_argument("--vm", help="VM uuid/name", required=False)
+    parser.add_argument("--vpc", help="VPC uuid", required=False)
     parser.add_argument("--filename", help="filename with names/uuid of VMs to migrate", required=False)
     parser.add_argument("--skip-sg", action='store_true', help="skip security-groups", default=False, required=False)
     parser.add_argument("--ignore-vm-state", action='store_true',
@@ -653,13 +690,13 @@ if __name__ == "__main__":
         if not args.vm:
             logger.info("Please provide the VM name/UUID you want to migrate")
             sys.exit(1)
-        migrate_vm(args.vm)
+        migrate_vm(args.vm, args.vpc)
         sys.exit(0)
-    if args.op == 'migrate_project_vms':
-        if not args.vm:
-            logger.info("Please provide the VM name/UUID you want to migrate")
+    if args.op == 'migrate_vpc_vms':
+        if not args.vpc:
+            logger.info("Please provide the VPC ID fir the you want to migrate")
             sys.exit(1)
-        migrate_project_vm()
+        migrate_vpc_vms(args.vpc)
         sys.exit(0)
     elif args.op == 'manage':
         if args.volume_id:
