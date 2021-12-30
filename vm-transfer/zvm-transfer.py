@@ -343,7 +343,7 @@ def get_vpsa_volume_by_name(vpsa_requester, display_name, must_succeed=False):
     return volume
 
 
-def update_vpsa_volume_dedup_compression(vpsa_volume):
+def update_vpsa_volume_dedup_compression(client, vpsa_volume):
     logger.info("Updating volume %s (%s) to use dedup and compression", vpsa_volume['display_name'],
                 vpsa_volume['name'])
     vpsa_requester = get_vpsa_requester(client, Config.DST_POOL_ID)
@@ -369,7 +369,7 @@ def break_mirror_and_refresh_volumes(client, mirror_job, volume_id):
     response.raise_for_status()
     volume = get_vpsa_volume_by_name(vpsa_requester, expected_volume_name, must_succeed=True)
     # update volume compression and dedupe
-    update_vpsa_volume_dedup_compression(volume)
+    update_vpsa_volume_dedup_compression(client, volume)
     return rename_mirror_job_volume_and_refresh_volumes(client, volume['display_name'], volume_id)
 
 
