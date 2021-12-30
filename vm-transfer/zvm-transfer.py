@@ -34,6 +34,7 @@ logger = logging.getLogger(LOGGER_NAME)
 
 arguments = None
 vpsa_requesters_cache = dict()
+symp_client_cache = dict()
 
 
 def migrate_vm(vm_id_or_name, vpc_id=None):
@@ -102,6 +103,11 @@ def get_vm_by_name(client, vm_name, vm_vpc_id=None, project_id=None, vm_list=Non
 
 
 def init_src_symp_client():
+    cache_key = "{}.{}.{}".format(Config.SRC_ACCOUNT,
+                                  Config.SRC_USERNAME,
+                                  Config.SRC_PROJECT_ID)
+    if symp_client_cache.get(cache_key):
+        return symp_client_cache.get(cache_key)
     my_session = requests.Session()
     my_session.verify = False
     client = symphony_client.Client(url='https://%s' % Config.SRC_CLUSTER_IP, session=my_session)
@@ -114,6 +120,11 @@ def init_src_symp_client():
 
 
 def init_dst_symp_client():
+    cache_key = "{}.{}.{}".format(Config.DST_ACCOUNT,
+                                  Config.DST_USERNAME,
+                                  'default')
+    if symp_client_cache.get(cache_key):
+        return symp_client_cache.get(cache_key)
     my_session = requests.Session()
     my_session.verify = False
     client = symphony_client.Client(url='https://%s' % Config.DST_CLUSTER_IP, session=my_session)
