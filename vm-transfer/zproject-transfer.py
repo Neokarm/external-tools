@@ -259,7 +259,7 @@ class VpcMigrator(BaseMigrator):
         return dst_vpc
 
     def _align_src_vpc_to_dst(self, src_vpc_object, dst_vpc):
-        self._align_src_obj_tags_to_dst(self.client.vpcs, src_vpc_object, dst_vpc)
+        self._align_src_obj_tags_to_dst(self.client.vpcs, "vpc_ids", src_vpc_object, dst_vpc)
         if src_vpc_object['enable_dns_support'] != dst_vpc['enable_dns_support']:
             self.client.vpcs.update(vpc_id=dst_vpc['id'],
                                     enable_dns_support=src_vpc_object['enable_dns_support'],
@@ -268,15 +268,22 @@ class VpcMigrator(BaseMigrator):
         return dst_vpc
 
     @staticmethod
-    def _align_src_obj_tags_to_dst(client_prefix, src_obj, dst_obj):
+    def _align_src_obj_tags_to_dst(client_prefix, id_moniker, src_obj, dst_obj):
         src_tags_set = set(src_obj['tags'] or [])
         dst_tags_set = set(dst_obj['tags'] or [])
         tags_to_add = src_tags_set - dst_tags_set
         tags_to_remove = dst_tags_set - src_tags_set
         if tags_to_add:
-            client_prefix.add_tags(dhcp_options_ids=[dst_objs['id']],
-                                   tags=list(tags_to_add))
+            params = {
+                id_moniker: [dst_objs['id']],
+                "tags": list(tags_to_add)
+            }
+            client_prefix.add_tags(**params)
         if tags_to_remove:
+            params = {
+                id_moniker: [dst_objs['id']],
+                "tags": list(tags_to_remove)
+            }
             client_prefix.remove_tags(dhcp_options_ids=[dst_objs['id']],
                                       tags=list(tags_to_remove))
 
@@ -313,7 +320,7 @@ class VpcMigrator(BaseMigrator):
         logger.info("Created DHCP Options %s", dst_dhcp_options)
         logger.info("Associating VPC %s with DHCP Options %s", dst_vpc['id'], dst_dhcp_options['id'])
         self.client.vpcs.associate_dhcp_options(dst_vpc['id'], dst_dhcp_options['id'])
-        self._align_src_obj_tags_to_dst(self.client.vpcs.dhcp_options, src_dhcp_options, dst_dhcp_options)
+        self._align_src_obj_tags_to_dst(self.client.vpcs.dhcp_options, "dhcp_options_id", src_dhcp_options, dst_dhcp_options)
         return dst_dhcp_options
 
     def _create_security_groups(self, src_vpc_object, dst_vpc):
@@ -356,7 +363,7 @@ class VpcMigrator(BaseMigrator):
                 group_id=dst_sg['id'],
                 permissions={"ip_permissions_ingress": ingress_rules,
                              "ip_permissions_egress": egress_rules})
-            self._align_src_obj_tags_to_dst(self.client.vpcs.security_groups, src_sg, dst_sg)
+            self._align_src_obj_tags_to_dst(self.client.vpcs.security_groups, "security_group_id", src_sg, dst_sg)
         current_dst_security_groups = self.client.vpcs.security_groups.list(vpc_id=dst_vpc['id'])
         return current_dst_security_groups
 
@@ -387,7 +394,8 @@ class VpcMigrator(BaseMigrator):
         self.client.vpcs.internet_gateways.attach(internet_gateway=dst_internet_gateway['id'],
                                                   vpc_id=dst_vpc['id'])
         dst_internet_gateway = self.client.vpcs.internet_gateways.get(dst_internet_gateway['id'])
-        self._align_src_obj_tags_to_dst(self.client.vpcs.internet_gateways, src_internet_gateway, dst_internet_gateway)
+        self._align_src_obj_tags_to_dst(self.client.vpcs.internet_gateways, "internet_gateway_id",
+                                        src_internet_gateway, dst_internet_gateway)
         return dst_internet_gateway
 
     @staticmethod
@@ -457,7 +465,7 @@ class VpcMigrator(BaseMigrator):
                 logger.info("Associating direct-network %s to VPC %s", dst_direct_subnet["id"], dst_vpc["id"])
                 self.client.vpcs.direct_networks.attach(network_id=dst_direct_subnet["id"], vpc_id=dst_vpc["id"])
             self.client.vpcs.direct_networks.update(network_id=dst_direct_subnet["id"],
-                                                    name=dst_vpc["name"],
+                                                    name=dst_direct_subnet["name"],
                                                     description=dst_vpc["description"])
         else:
             self._log_and_raise("No direct subnet for this Project/VPC\n"
@@ -498,7 +506,7 @@ class VpcMigrator(BaseMigrator):
                 self.client.vpcs.networks.set_default(dst_subnet['id'])
             elif src_subnet['is_default'] and dst_subnet['is_default']:
                 logger.info("Dest subnet %s (%s) already set as default subnet", dst_subnet['name'], dst_subnet['id'])
-            self._align_src_obj_tags_to_dst(self.client.vpcs.networks, src_subnet, dst_subnet)
+            self._align_src_obj_tags_to_dst(self.client.vpcs.networks, "networks_id", src_subnet, dst_subnet)
         return dst_subnets
 
     def _associate_subnets(self, src_vpc_object, dst_vpc, dst_route_tables, dst_subnets):
