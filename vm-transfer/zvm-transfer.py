@@ -90,7 +90,7 @@ def get_vm_by_name(client, vm_name, vm_vpc_id=None, project_id=None, vm_list=Non
         vm_list = client.vms.list(detailed=True)
     filtered_vm_list = [vm for vm in vm_list
                         if vm.name == vm_name
-                        and (vm_vpc_id is None or vm.vpc_id == vm_vpc_id)
+                        and (vm_vpc_id is None or vm.get('vpc_id') == vm_vpc_id)
                         and vm.project_id == project_id]
     if not filtered_vm_list:
         logger.info("VM with name: %s does not exists", vm_name)
