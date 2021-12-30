@@ -481,6 +481,11 @@ def check_manage_volume(manageable_volumes, existing_volumes, mirror_jobs, volum
         logger.info(msg)
         raise Exception(msg)
 
+    if not volume_to_manage:
+        msg = "Did not find volume/mirror job/mirror volume %s" % volume_id
+        logger.info(msg)
+        raise Exception(msg)
+
     if volume_to_manage.get('reason_not_safe') == 'Volume not available':
         msg = "volume %s is not yet available" % volume_id
         logger.info(msg)
