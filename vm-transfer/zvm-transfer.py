@@ -616,13 +616,13 @@ def migrate_vpc_vms(vpc_id):
                         and vm.managing_resource.resource_id is None]
     logger.info("The following VMs will be transferred:\n%s", pformat({vm.id: vm.name for vm in filtered_vm_list}))
     ans = raw_input("Continue [Y/n]? ")
-    if ans != 'Y':
+    if arguments.answer_yes or ans != 'Y':
         sys.exit(1)
     for vm in filtered_vm_list:
         try:
             logger.info("migrate VM: %s %s", vm.name, vm.id)
             ans = raw_input("Continue [Y/n]? ")
-            if ans == 'Y':
+            if arguments.answer_yes or ans == 'Y':
                 _migrate_vm(vm)
         except Exception as exc:
             logger.exception("Failed to migrate VM: %s with error %s", vm.name, vm.id)
@@ -654,6 +654,7 @@ def parse_arguments():
                         help="Run in dry run mode (Default)", required=False)
     parser.set_defaults(dry_run=Config.DEFAULT_IS_DRY_RUN)
     parser.add_argument("--vm", help="VM uuid/name", required=False)
+    parser.add_argument("--answer-yes", help="Auto answer Y", required=False)
     parser.add_argument("--vpc", help="VPC uuid", required=False)
     parser.add_argument("--filename", help="filename with names/uuid of VMs to migrate", required=False)
     parser.add_argument("--skip-sg", action='store_true', help="skip security-groups", default=False, required=False)
