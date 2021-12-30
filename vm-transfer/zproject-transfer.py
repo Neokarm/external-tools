@@ -60,12 +60,12 @@ def init_logger(name):
 
 
 def init_dst_symp_client():
-    return VpcMigrator.init_client(Config.DST_CLUSTER_IP,
-                                   Config.DST_ACCOUNT,
-                                   Config.DST_USERNAME,
-                                   Config.DST_PASSWORD,
-                                   Config.DST_PROJECT_ID,
-                                   Config.DST_MFA_SECRET)
+    return BaseMigrator.init_client(Config.DST_CLUSTER_IP,
+                                    Config.DST_ACCOUNT,
+                                    Config.DST_USERNAME,
+                                    Config.DST_PASSWORD,
+                                    Config.DST_PROJECT_ID,
+                                    Config.DST_MFA_SECRET)
 
 
 def get_to_ipdb():
@@ -78,16 +78,7 @@ def filter_nones(**dict_to_filter):
     return {key: value for key, value in dict_to_filter.iteritems() if value is not None}
 
 
-class ProjectMigrator(object):
-    def __init__(self, args, transfer_src_project, transfer_dst_project=None):
-        pass
-
-
-class VpcMigrator(object):
-    MONIKERS_MAP = {}
-    VPC_CREATION_TIMEOUT = 120
-    SUBNET_CREATION_TIMEOUT = 120
-
+class BaseMigrator(object):
     def __init__(self, args, transfer_src_project, transfer_dst_project=None):
         self.args = args
         self.cluster_dump = self._load_cluster_dump()
@@ -110,7 +101,7 @@ class VpcMigrator(object):
             self.transfer_dst_project = self._filter_array_of_dicts_by_attr(dst_projects_list,
                                                                             "name",
                                                                             transfer_dst_project)
-            if self.transfer_dst_project is None:
+            if not self.transfer_dst_project:
                 self.transfer_dst_project = self._filter_array_of_dicts_by_attr(dst_projects_list,
                                                                                 "id",
                                                                                 transfer_dst_project)
@@ -183,6 +174,30 @@ class VpcMigrator(object):
         logger.error(msg)
         raise Exception(msg)
 
+
+class ProjectMigrator(BaseMigrator):
+    def __init__(self, args, transfer_src_project, transfer_dst_project=None):
+        super(ProjectMigrator, self).__init__(args, transfer_src_project, transfer_dst_project)
+
+    def migrate_project(self):
+        vpcs_to_migrate = self._filter_array_of_dicts_by_attr(self.cluster_dump['vpcs'],
+                                                              "project_id",
+                                                              self.transfer_src_project_id)
+        for vpc in vpcs_to_migrate:
+            vpc_migrator = VpcMigrator(self.args,
+                                       transfer_src_project=self.transfer_src_project_id,
+                                       transfer_dst_project = self.transfer_dst_project_id)
+            vpc_migrator.migrate_vpc(vpc['id'])
+
+
+class VpcMigrator(BaseMigrator):
+    MONIKERS_MAP = {}
+    VPC_CREATION_TIMEOUT = 120
+    SUBNET_CREATION_TIMEOUT = 120
+
+    def __init__(self, args, transfer_src_project, transfer_dst_project=None):
+        super(VpcMigrator, self).__init__(args, transfer_src_project, transfer_dst_project)
+
     def _wait_for_all_vpc_subnets_ready(self, vpc_id):
         expiration = monotonic() + VpcMigrator.SUBNET_CREATION_TIMEOUT
         subnets = self.client.vpcs.networks.list(vpc_id=vpc_id)
@@ -246,9 +261,10 @@ class VpcMigrator(object):
     def _align_src_vpc_to_dst(self, src_vpc_object, dst_vpc):
         self._align_src_obj_tags_to_dst(self.client.vpcs, src_vpc_object, dst_vpc)
         if src_vpc_object['enable_dns_support'] != dst_vpc['enable_dns_support']:
-            dst_vpc = self.client.vpcs.update(vpc_id=dst_vpc['id'],
-                                              enable_dns_support=src_vpc_object['enable_dns_support'],
-                                              enable_dns_hostnames=src_vpc_object['enable_dns_hostnames'])
+            self.client.vpcs.update(vpc_id=dst_vpc['id'],
+                                    enable_dns_support=src_vpc_object['enable_dns_support'],
+                                    enable_dns_hostnames=src_vpc_object['enable_dns_hostnames'])
+        dst_vpc = self.client.vpcs.get(vpc_id=dst_vpc['id'])
         return dst_vpc
 
     @staticmethod
@@ -316,7 +332,10 @@ class VpcMigrator(object):
         # Need to set all rules after SG exists - as there may be rules with remote groups
         # Also align tags
         for dst_sg in current_dst_security_groups:
-            src_sg = src_security_groups_by_name[dst_sg['name']]
+            src_sg = src_security_groups_by_name.get(dst_sg['name'])
+            if src_sg is None:
+                logger.warning("Could not find %s SG in source VPC", dst_sg['name'])
+                continue
             # Keep only SG names & description in rules
             ingress_rules = copy.deepcopy(src_sg['ip_permissions_ingress'])
             for ingress_rule in ingress_rules:
@@ -583,12 +602,14 @@ def main():
         get_to_ipdb()
 
     if args.op == 'migrate_project':
-        if not args.project:
-            logger.info("Please provide the Project name/UUID you want to migrate")
+        args.transfer_src_project = args.transfer_src_project or Config.SRC_TRANSFER_PROJECT_ID
+        args.transfer_dst_project = args.transfer_dst_project or Config.DST_TRANSFER_PROJECT_ID
+        if not args.transfer_src_project or not args.transfer_dst_project:
+            logger.info("Please provide the source and destination Projects name/UUID for the migration")
             sys.exit(1)
         ProjectMigrator(args,
-                        args.transfer_src_project or Config.SRC_TRANSFER_PROJECT_ID,
-                        args.transfer_dst_project or Config.DST_TRANSFER_PROJECT_ID).migrate_project()
+                        args.transfer_src_project,
+                        args.transfer_dst_project).migrate_project()
         sys.exit(0)
     elif args.op == 'migrate_vpc':
         if not args.vpc:
