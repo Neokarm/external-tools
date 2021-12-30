@@ -623,9 +623,11 @@ def main():
         if not args.vpc:
             logger.info("Please provide the VPC name/UUID you want to migrate")
             sys.exit(1)
+        args.transfer_src_project = args.transfer_src_project or Config.SRC_TRANSFER_PROJECT_ID
+        args.transfer_dst_project = args.transfer_dst_project or Config.DST_TRANSFER_PROJECT_ID
         VpcMigrator(args,
-                    args.transfer_src_project or Config.SRC_TRANSFER_PROJECT_ID,
-                    args.transfer_dst_project or Config.DST_TRANSFER_PROJECT_ID).migrate_vpc(args.vpc)
+                    args.transfer_src_project,
+                    args.transfer_dst_project).migrate_vpc(args.vpc)
         sys.exit(0)
     else:
         logger.info("Please provide a valid op, one of:  migrate_project/migrate_vpc")
