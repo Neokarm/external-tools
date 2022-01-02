@@ -116,6 +116,7 @@ def init_src_symp_client():
                  password=Config.SRC_PASSWORD,
                  project=Config.SRC_PROJECT_ID,
                  mfa_secret=Config.SRC_MFA_SECRET)
+    symp_client_cache[cache_key] = client
     return client
 
 
@@ -133,6 +134,7 @@ def init_dst_symp_client():
                  password=Config.DST_PASSWORD,
                  project='default',
                  mfa_secret=Config.DST_MFA_SECRET)
+    symp_client_cache[cache_key] = client
     return client
 
 
