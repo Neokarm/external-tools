@@ -103,9 +103,10 @@ def get_vm_by_name(client, vm_name, vm_vpc_id=None, project_id=None, vm_list=Non
 
 
 def init_src_symp_client():
-    cache_key = "{}.{}.{}".format(Config.SRC_ACCOUNT,
-                                  Config.SRC_USERNAME,
-                                  Config.SRC_PROJECT_ID)
+    cache_key = "{}.{}.{}.{}".format(Config.SRC_CLUSTER_IP,
+                                     Config.SRC_ACCOUNT,
+                                     Config.SRC_USERNAME,
+                                     Config.SRC_PROJECT_ID)
     if symp_client_cache.get(cache_key):
         return symp_client_cache.get(cache_key)
     my_session = requests.Session()
@@ -121,9 +122,10 @@ def init_src_symp_client():
 
 
 def init_dst_symp_client():
-    cache_key = "{}.{}.{}".format(Config.DST_ACCOUNT,
-                                  Config.DST_USERNAME,
-                                  'default')
+    cache_key = "{}.{}.{}.{}".format(Config.SRC_CLUSTER_IP,
+                                     Config.DST_ACCOUNT,
+                                     Config.DST_USERNAME,
+                                     'default')
     if symp_client_cache.get(cache_key):
         return symp_client_cache.get(cache_key)
     my_session = requests.Session()
