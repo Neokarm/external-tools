@@ -122,7 +122,7 @@ def init_src_symp_client():
 
 
 def init_dst_symp_client():
-    cache_key = "{}.{}.{}.{}".format(Config.SRC_CLUSTER_IP,
+    cache_key = "{}.{}.{}.{}".format(Config.DST_CLUSTER_IP,
                                      Config.DST_ACCOUNT,
                                      Config.DST_USERNAME,
                                      'default')
