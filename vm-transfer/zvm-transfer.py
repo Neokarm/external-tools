@@ -362,7 +362,7 @@ def update_vpsa_volume_dedup_compression(client, vpsa_volume):
     logger.info("Updating volume %s (%s) to use dedup and compression", vpsa_volume['display_name'],
                 vpsa_volume['name'])
     vpsa_requester = get_vpsa_requester(client, Config.DST_POOL_ID)
-    api_data = json.dumps({'dedupe': 'YES', 'compress':'YES'})
+    api_data = json.dumps({"volume": {'dedupe': 'YES', 'compress':'YES'}})
     response = vpsa_requester('PUT', '/api/volumes/{id}.json'.format(id=vpsa_volume['name']),
                               data=api_data)
     if not _validate_vpsa_response(response):
