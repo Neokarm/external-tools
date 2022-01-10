@@ -194,7 +194,7 @@ def get_vpsa_requester(client, pool_id):
     if arguments.use_cc_passthrough:
         url_prefix = Config.DST_CC_URL_PREFIX_TEMPLATE.format(
             host=Config.DST_CC_HOST,
-            cloud=Config.DST_CC_CLOUD_ID,
+            cloud=Config.DST_CC_CLOUD_ID.replace('-', ''),
             vsa=Config.DST_CC_VPSA_ID)
     else:
         scheme = 'https' if vpsa_params['use_ssl'] else 'http'
