@@ -275,17 +275,16 @@ class VpcMigrator(BaseMigrator):
         tags_to_remove = dst_tags_set - src_tags_set
         if tags_to_add:
             params = {
-                id_moniker: [dst_objs['id']],
+                id_moniker: [dst_obj['id']],
                 "tags": list(tags_to_add)
             }
             client_prefix.add_tags(**params)
         if tags_to_remove:
             params = {
-                id_moniker: [dst_objs['id']],
+                id_moniker: [dst_obj['id']],
                 "tags": list(tags_to_remove)
             }
-            client_prefix.remove_tags(dhcp_options_ids=[dst_objs['id']],
-                                      tags=list(tags_to_remove))
+            client_prefix.remove_tags(**params)
 
     def _create_dhcp_options(self, src_vpc_object, dst_vpc):
         src_dhcp_options = self._filter_array_of_dicts_by_attr(self.cluster_dump.get("dhcp_options"),
