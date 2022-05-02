@@ -1,0 +1,16 @@
+[
+    {
+        "Action": [
+            "vm:action",
+            "vm:start",
+            "vm:stop",
+            "vm:pause",
+            "vm:unpause",
+            "vm:reboot"
+        ],
+        "Resource": [
+            "*"
+        ],
+        "Effect": "Allow"
+    }
+]
