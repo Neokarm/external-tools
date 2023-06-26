@@ -271,6 +271,10 @@ def create_networking_map(src_client, dst_client, vm):
         }
         all_security_group_names.update(security_group_names)
         existing_sg = dst_client.vpcs.security_groups.list(project_id=Config.DST_TRANSFER_PROJECT_ID, name=list(security_group_names))
+        if arguments.skip_ipv4:
+            network.pop('ipv4')
+        if arguments.skip_mac:
+            network.pop('mac')
         if len(existing_sg) != len(all_security_group_names):
             msg = "Didn't find matching security_groups in destination out of: %s" % all_security_group_names
             logger.info(msg)
@@ -680,6 +684,8 @@ def parse_arguments():
     parser.add_argument("--vpc", help="VPC uuid", required=False)
     parser.add_argument("--filename", help="filename with names/uuid of VMs to migrate", required=False)
     parser.add_argument("--skip-sg", action='store_true', help="skip security-groups", default=False, required=False)
+    parser.add_argument("--skip-ipv4", action='store_true', help="skip ipv4", default=False, required=False)
+    parser.add_argument("--skip-mac", action='store_true', help="skip mac", default=False, required=False)
     parser.add_argument("--ignore-vm-state", action='store_true',
                         help="Ignore source VM state when transferring VM definition", default=False, required=False)
     parser.add_argument("--ipdb", action='store_true', help="give me ipdb with clients and continue",
