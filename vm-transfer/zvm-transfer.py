@@ -126,7 +126,7 @@ def init_dst_symp_client():
     cache_key = "{}.{}.{}.{}".format(Config.DST_CLUSTER_IP,
                                      Config.DST_ACCOUNT,
                                      Config.DST_USERNAME,
-                                     'default')
+                                     Config.DST_PROJECT_ID)
     if symp_client_cache.get(cache_key):
         return symp_client_cache.get(cache_key)
     my_session = requests.Session()
@@ -135,7 +135,7 @@ def init_dst_symp_client():
     client.login(domain=Config.DST_ACCOUNT,
                  username=Config.DST_USERNAME,
                  password=Config.DST_PASSWORD,
-                 project='default',
+                 project=Config.DST_PROJECT_ID,
                  mfa_secret=Config.DST_MFA_SECRET)
     symp_client_cache[cache_key] = client
     return client
