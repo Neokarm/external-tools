@@ -30,6 +30,7 @@ from munch import Munch, unmunchify
 import symphony_client
 
 LOGS_DIR = "."
+DATA_PATH_PREFIX = '{}/strato-remote-snapshots/v1/'
 SNAPSHOT_CLEANUP_LOGS_DIR = LOGS_DIR + "/snapshots-cleanup-logs"
 LOGGER_NAME = "snapshots-cleanup"
 VPSA_VOLUME_TEMPLATE = 'neokarm_volume-{}'
@@ -49,6 +50,7 @@ VALID_OPS = [
     'remote-metadata-status',
     'purge-remote-metadata',
 ]
+ALL_EXTERNAL_ENDPOINTS = 'all_external_endpoints'
 ALL_VMS = 'all_vms'
 ALL_VOLUMES = 'all_volumes'
 IMAGE_SNAPSHOTS = 'image_snapshots'
@@ -88,6 +90,8 @@ LIVE_METADATA_REMOTE_NO_LOCAL_API = 'live_metadata_remote_no_local_api'
 LOCAL_API_WITH_LIVE_METADATA_REMOTE = 'local_api_with_live_metadata_remote'
 READY_LOCAL_API_WITH_LIVE_METADATA_REMOTE = 'ready_local_api_with_live_metadata_remote'
 READY_LOCAL_API_WITH_NO_LIVE_METADATA_REMOTE = 'ready_local_api_with_no_live_metadata_remote'
+ALL_VOLUME_REMOTE_SNAPSHOTS_BY_LOCAL_SNAPSHOT_ID = 'all_volume_remote_snapshots_by_local_snapshot_id'
+LOCAL_SNAPSHOT_ID_WITHOUT_REMOTE_SNAPSHOT_ID = "local_snapshot_id_without_remote_snapshot_id"
 LABEL_DICT = OrderedDict()
 LABEL_DICT[ALL_VMS] = "VMs"
 LABEL_DICT[ALL_VOLUMES] = "Volumes"
@@ -127,7 +131,9 @@ LABEL_DICT[LIVE_METADATA_REMOTE_NO_LOCAL_API] = "Live remote snapshot metadata w
 LABEL_DICT[LOCAL_API_WITH_LIVE_METADATA_REMOTE] = "Local API remote snapshot with live object"
 LABEL_DICT[READY_LOCAL_API_WITH_LIVE_METADATA_REMOTE] = 'Ready Local API remote snapshot with live remote metadata'
 LABEL_DICT[READY_LOCAL_API_WITH_NO_LIVE_METADATA_REMOTE] = 'Ready Local API remote snapshot without live remote metadata'
-
+LABEL_DICT[ALL_VOLUME_REMOTE_SNAPSHOTS_BY_LOCAL_SNAPSHOT_ID] = "All volume remote snapshots keyed by local_snapshot_id"
+LABEL_DICT[LOCAL_SNAPSHOT_ID_WITHOUT_REMOTE_SNAPSHOT_ID] = "Local snapshots without remote snapshot (or deleted)"
+LABEL_DICT[ALL_EXTERNAL_ENDPOINTS] = "External endpoints"
 logger = logging.getLogger()
 
 vpsa_requesters_cache = dict()
@@ -460,6 +466,7 @@ def snapshots_status(args, client):
     vm_snapshots = client.vm_snapshots.list()
     results[ALL_VM_REMOTE_SNAPSHOTS] = OrderedDict({rvs.id: rvs for rvs in client.remote_vm_snapshots.list()})
     results[ALL_VOLUME_REMOTE_SNAPSHOTS] = OrderedDict({rs.id: rs for rs in client.remote_snapshots.list()})
+    results[ALL_VOLUME_REMOTE_SNAPSHOTS_BY_LOCAL_SNAPSHOT_ID] = OrderedDict({rs.snapshot_id: rs for rs in client.remote_snapshots.list()})
     vms_to_protect = {}
     if vms_ids_to_protect:
         vms_to_protect = {vm.id: vm for vm in client.vms.list(id=vms_ids_to_protect)}
@@ -669,7 +676,7 @@ def add_remote_metadata_status_for_external_endpoint(args, client, label, status
     logger.info(label)
     get_to_ipdb(args.ipdb)
     mount_point = _mount_vpsa_external_endpoint(client, external_endpoint_id)
-    data_prefix = '{}/strato-remote-snapshots/v1/'.format(mount_point)
+    data_prefix = DATA_PATH_PREFIX.format(mount_point)
     # list all snapshots metadata from mount
     file_count = 0
     count = 0
@@ -684,6 +691,7 @@ def add_remote_metadata_status_for_external_endpoint(args, client, label, status
             # get snapshot info
             # path format is:
             #  strato-remote-snapshots/v1/27cc63bcdea44bf393a2181e5386b5c5/8c9a2465-4466-4f51-b668-181b2eda1630/12F/6f0433d1-55e2-487a-ba02-3f57c34d8fce/7dd679fc-4c32-46fc-99b7-001f640e227d
+            #  strato-remote-snapshots/v1/8be4559a157f4d5a9a3f0882b0916345/2c0599be-7173-4d2c-822d-3fc1c0a28dd6/2F/e31fc46f-98a1-4489-96fc-c25a4037f83e/8a5dada3-8a71-454d-82b0-642888b211e4
             #  strato-remote-snapshots/v1/
             #     <project-id>/<VM-ID\Volume-ID>/NA/<local-snapshot-id>/<remote-snapshot-id>/meta
             parts = root[len(data_prefix):].split('/')
@@ -749,6 +757,7 @@ def add_remote_metadata_status_for_external_endpoint(args, client, label, status
                         status_dict[LIVE_METADATA_REMOTE_WITH_LOCAL_API_OTHER][remote_volume_snapshot_id] = remote_snapshot_data
                 else:
                     status_dict[LIVE_METADATA_REMOTE_NO_LOCAL_API][remote_volume_snapshot_id] = remote_snapshot_data
+            # check for missing metadata for remote_snapshots
     _unmount_vpsa_nfs_share(mount_point)
     for local_api_remote_snapshot in status_dict[ALL_VOLUME_REMOTE_SNAPSHOTS].values():
         if local_api_remote_snapshot.external_endpoint_id == external_endpoint_id:
@@ -762,6 +771,7 @@ def add_remote_metadata_status_for_external_endpoint(args, client, label, status
 def add_remote_metadata_status_for_all_vpsa_external_endpoint(args, client, label, status_dict):
     logger.info(label)
     external_endpoints = client.externalendpoints.list()
+    status_dict[ALL_EXTERNAL_ENDPOINTS] = OrderedDict({ee.id: ee for ee in external_endpoints})
     for external_endpoint in external_endpoints:
         if external_endpoint.endpoint_type == 'vpsa_backup':
             label = "Analyzing remote metadata status for external endpoint: {} ({})".format(external_endpoint.id, external_endpoint.name)
@@ -774,20 +784,26 @@ def purge_remote_metadata_status_for_external_endpoint(args, client, label, stat
     if not are_you_sure(args):
         sys.exit(0)
     mount_point = _mount_vpsa_external_endpoint(client, external_endpoint_id)
+    count = 0
+    total = len(status_dict[DELETED_METADATA_NO_LOCAL_REMOTE_SNAPSHOTS])
     for remote_metadata in status_dict[DELETED_METADATA_NO_LOCAL_REMOTE_SNAPSHOTS].values():
-        if remote_metadata.get('external_endpoint_id') == 'external_endpoint_id':
+        if remote_metadata.get('external_endpoint_id') == external_endpoint_id:
+            count += 1
             path = remote_metadata.get('path')
             if path:
                 logger.info(
-                    "Going to delete remote volume snapshot %s metadata (%s):\n  %s",
+                    "Going to delete remote volume snapshot %s metadata (%s) (%s/%s):\n  %s",
                     remote_metadata.get('remote_volume_snapshot_id'),
                     external_endpoint_id,
+                    count,
+                    total,
                     path
                 )
                 if not args.dry_run:
                     shutil.rmtree(path)
                 else:
                     logger.info("Skipping")
+                time.sleep(0.01)
             else:
                 logger.error(
                     "Missing path for remote volume snapshot %s metadata %s",
@@ -795,6 +811,12 @@ def purge_remote_metadata_status_for_external_endpoint(args, client, label, stat
                     external_endpoint_id,
                     path
                 )
+    # need to add command to clean directories: find . -empty -type d -printf "removed '%p'\n" -delete
+    data_prefix = DATA_PATH_PREFIX.format(mount_point)
+    logger.info("deleting empty directories starting at %s", data_prefix)
+    rc = subprocess.check_call(['find', data_prefix, '-empty', '-type', 'd', '-delete'])
+    if rc != 0:
+        logger.error("Failed to cleanup %s, please check NFS mount status", data_prefix)
     _unmount_vpsa_nfs_share(mount_point)
 
 
