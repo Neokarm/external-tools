@@ -1,0 +1,3 @@
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# remote snapshots cleanup
+05 01 * * *      root    /usr/bin/python2.7 /usr/bin/snapshots-cleanup.py --internal purge-remote-metadata

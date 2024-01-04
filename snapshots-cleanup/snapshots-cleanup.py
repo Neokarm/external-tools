@@ -29,7 +29,7 @@ from munch import Munch, unmunchify
 
 import symphony_client
 
-LOGS_DIR = "."
+LOGS_DIR = "/var/log/stratoscale"
 DATA_PATH_PREFIX = '{}/strato-remote-snapshots/v1/'
 SNAPSHOT_CLEANUP_LOGS_DIR = LOGS_DIR + "/snapshots-cleanup-logs"
 LOGGER_NAME = "snapshots-cleanup"
@@ -72,6 +72,12 @@ PROTECTED_VM_SNAPSHOTS_PGS = 'protected_vm_snapshots_pgs'
 ALL_VM_SNAPSHOTS = "all_vm_snapshots"
 ALL_VOLUME_SNAPSHOTS = "all_volume_snapshots"
 ALL_VM_REMOTE_SNAPSHOTS = 'all_vm_remote_snapshots'
+ALL_VM_REMOTE_SNAPSHOTS_READY = 'all_vm_remote_snapshots_ready'
+ALL_VM_REMOTE_SNAPSHOTS_IN_ERROR = 'all_vm_remote_snapshots_in_error'
+ALL_VM_REMOTE_SNAPSHOTS_VALID = 'all_vm_remote_snapshots_valid'
+ALL_VM_REMOTE_SNAPSHOTS_INVALID = 'all_vm_remote_snapshots_invalid'
+ALL_VM_REMOTE_SNAPSHOTS_VALID_DELETED = 'all_vm_remote_snapshots_valid_deleted'
+ALL_VM_REMOTE_SNAPSHOTS_VALID_IN_ERROR = 'all_vm_remote_snapshots_valid_in_error'
 ALL_VOLUME_REMOTE_SNAPSHOTS = 'all_volume_remote_snapshots'
 METADATA_REMOTE_SNAPSHOTS = 'metadata_remote_snapshots'
 METADATA_REMOTE_VM_SNAPSHOTS = 'metadata_remote_vm_snapshots'
@@ -91,13 +97,20 @@ LOCAL_API_WITH_LIVE_METADATA_REMOTE = 'local_api_with_live_metadata_remote'
 READY_LOCAL_API_WITH_LIVE_METADATA_REMOTE = 'ready_local_api_with_live_metadata_remote'
 READY_LOCAL_API_WITH_NO_LIVE_METADATA_REMOTE = 'ready_local_api_with_no_live_metadata_remote'
 ALL_VOLUME_REMOTE_SNAPSHOTS_BY_LOCAL_SNAPSHOT_ID = 'all_volume_remote_snapshots_by_local_snapshot_id'
-LOCAL_SNAPSHOT_ID_WITHOUT_REMOTE_SNAPSHOT_ID = "local_snapshot_id_without_remote_snapshot_id"
+VM_SNAPSHOTS_WITH_DELETED_SNAPSHOT_METADATA = "vm_snapshots_with_deleted_snapshot_metadata"
+VM_SNAPSHOTS_WITH_LIVE_SNAPSHOT_METADATA = "vm_snapshots_with_live_snapshot_metadata"
 LABEL_DICT = OrderedDict()
 LABEL_DICT[ALL_VMS] = "VMs"
 LABEL_DICT[ALL_VOLUMES] = "Volumes"
 LABEL_DICT[ALL_VM_SNAPSHOTS] = "VM snapshots"
 LABEL_DICT[ALL_VOLUME_SNAPSHOTS] = "Volume snapshots"
 LABEL_DICT[ALL_VM_REMOTE_SNAPSHOTS] = "VM remote snapshots"
+LABEL_DICT[ALL_VM_REMOTE_SNAPSHOTS_READY] = "VM remote snapshots in ready state"
+LABEL_DICT[ALL_VM_REMOTE_SNAPSHOTS_IN_ERROR] = "VM remote snapshots in error state"
+LABEL_DICT[ALL_VM_REMOTE_SNAPSHOTS_VALID] = "Valid remote VM snapshots"
+LABEL_DICT[ALL_VM_REMOTE_SNAPSHOTS_VALID_DELETED] = "Valid DELETED remote VM snapshots"
+LABEL_DICT[ALL_VM_REMOTE_SNAPSHOTS_VALID_IN_ERROR] = "Valid remote VM snapshots in local error state"
+LABEL_DICT[ALL_VM_REMOTE_SNAPSHOTS_INVALID] = "Invalid remote VM snapshots"
 LABEL_DICT[ALL_VOLUME_REMOTE_SNAPSHOTS] = "Volume remote snapshots"
 LABEL_DICT[PROTECTED_VOLUMES] = "Volumes to protect from retention"
 LABEL_DICT[IMAGE_SNAPSHOTS] = "Image snapshots"
@@ -123,6 +136,7 @@ LABEL_DICT[METADATA_REMOTE_VM_SNAPSHOTS] = "Remote VM snapshot metadata"
 LABEL_DICT[METADATA_REMOTE_VOLUME_SNAPSHOTS] = "Remote Volume snapshot metadata"
 LABEL_DICT[METADATA_REMOTE_NOTYPE_SNAPSHOTS] = "Remote snapshot metadata with unknown type"
 LABEL_DICT[LIVE_METADATA_REMOTE_SNAPSHOTS] = "Live remote snapshot metadata"
+LABEL_DICT[LIVE_METADATA_REMOTE_WITH_LOCAL] = "Live remote snapshot metadata with local"
 LABEL_DICT[LIVE_METADATA_REMOTE_WITH_LOCAL_API] = "Live remote snapshot metadata with local API"
 LABEL_DICT[LIVE_METADATA_REMOTE_WITH_LOCAL_API_READY] = "Live remote snapshot metadata with local API state ready"
 LABEL_DICT[LIVE_METADATA_REMOTE_WITH_LOCAL_API_ERROR] = "Live remote snapshot metadata with local API state error"
@@ -132,26 +146,29 @@ LABEL_DICT[LOCAL_API_WITH_LIVE_METADATA_REMOTE] = "Local API remote snapshot wit
 LABEL_DICT[READY_LOCAL_API_WITH_LIVE_METADATA_REMOTE] = 'Ready Local API remote snapshot with live remote metadata'
 LABEL_DICT[READY_LOCAL_API_WITH_NO_LIVE_METADATA_REMOTE] = 'Ready Local API remote snapshot without live remote metadata'
 LABEL_DICT[ALL_VOLUME_REMOTE_SNAPSHOTS_BY_LOCAL_SNAPSHOT_ID] = "All volume remote snapshots keyed by local_snapshot_id"
-LABEL_DICT[LOCAL_SNAPSHOT_ID_WITHOUT_REMOTE_SNAPSHOT_ID] = "Local snapshots without remote snapshot (or deleted)"
 LABEL_DICT[ALL_EXTERNAL_ENDPOINTS] = "External endpoints"
+LABEL_DICT[VM_SNAPSHOTS_WITH_DELETED_SNAPSHOT_METADATA] = "Local VM snapshots with deleted remote snapshot metadata"
+LABEL_DICT[VM_SNAPSHOTS_WITH_LIVE_SNAPSHOT_METADATA] = "Local VM snapshots with live remote snapshot metadata"
+
 logger = logging.getLogger()
 
 vpsa_requesters_cache = dict()
 symp_client_cache = dict()
 
 
-def init_logger():
+def init_logger(args):
     formatter = logging.Formatter('%(asctime)s [%(name)s] %(levelname)-10s %(message)s')
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(formatter)
     console_handler.setLevel(logging.INFO)
     logger.addHandler(console_handler)
-
-    if not os.path.exists(SNAPSHOT_CLEANUP_LOGS_DIR):
-        os.makedirs(SNAPSHOT_CLEANUP_LOGS_DIR)
-
-    logfile = '{logger_name}-{date}.log'.format(logger_name=LOGGER_NAME, date=datetime.now().strftime("%Y-%m-%d-%H%M"))
-    logfile_with_path = os.path.join(SNAPSHOT_CLEANUP_LOGS_DIR, logfile)
+    if args.internal:
+        logfile_with_path = '/var/log/stratoscale/{logger_name}.stratolog'.format(logger_name=LOGGER_NAME)
+    else:
+        if not os.path.exists(SNAPSHOT_CLEANUP_LOGS_DIR):
+            os.makedirs(SNAPSHOT_CLEANUP_LOGS_DIR)
+        logfile = '{logger_name}-{date}.log'.format(logger_name=LOGGER_NAME, date=datetime.now().strftime("%Y-%m-%d-%H%M"))
+        logfile_with_path = os.path.join(SNAPSHOT_CLEANUP_LOGS_DIR, logfile)
 
     file_handler = logging.FileHandler(filename=logfile_with_path)
     atexit.register(file_handler.close)
@@ -162,7 +179,7 @@ def init_logger():
 
     logger.setLevel(logging.DEBUG)
 
-    logger.info("Logger initialized")
+    logger.info("========> Snapshot cleanup started")
 
 
 class Config(object):
@@ -193,6 +210,7 @@ class Config(object):
 
 
 def init_symp_client(args):
+    get_to_ipdb(args.ipdb)
     env_vars = [Config.CLUSTER_IP, Config.LOGIN_ACCOUNT, Config.LOGIN_USERNAME, Config.LOGIN_PROJECT_NAME]
     if None in env_vars:
         raise Exception("Not all mandatory environment variables are set\n"
@@ -466,6 +484,10 @@ def snapshots_status(args, client):
     vm_snapshots = client.vm_snapshots.list()
     results[ALL_VM_REMOTE_SNAPSHOTS] = OrderedDict({rvs.id: rvs for rvs in client.remote_vm_snapshots.list()})
     results[ALL_VOLUME_REMOTE_SNAPSHOTS] = OrderedDict({rs.id: rs for rs in client.remote_snapshots.list()})
+    results[ALL_VM_REMOTE_SNAPSHOTS_READY] = OrderedDict({rs.id: rs for rs in client.remote_snapshots.list()
+                                                          if rs.state == 'ready'})
+    results[ALL_VM_REMOTE_SNAPSHOTS_IN_ERROR] = OrderedDict({rs.id: rs for rs in client.remote_snapshots.list()
+                                                             if rs.state == 'error'})
     results[ALL_VOLUME_REMOTE_SNAPSHOTS_BY_LOCAL_SNAPSHOT_ID] = OrderedDict({rs.snapshot_id: rs for rs in client.remote_snapshots.list()})
     vms_to_protect = {}
     if vms_ids_to_protect:
@@ -590,14 +612,25 @@ def clean_volume_snapshots(args, client, label, volume_snapshots, all_volumes):
         time.sleep(SLEEP_BEFORE_NEXT_OP)
 
 
-def print_snapshots_status(status_dict):
-    for key, label in LABEL_DICT.items():
-        logger.info("There are %s %s", len(status_dict[key]), label)
-
-
 def print_all_snapshots(status_dict):
     for key, result in status_dict.items():
-        logger.info("%s (%s):\n%s", LABEL_DICT[key], len(result), json.dumps(unmunchify(result), indent=2))
+        logger.debug("====================================================")
+        logger.debug("%s (%s):", LABEL_DICT.get(key) or key, len(result))
+        if isinstance(result, list):
+            for r in result:
+                logger.debug("     :%s", json.dumps(unmunchify(r), indent=2))
+        elif isinstance(result, dict):
+            for k, v in result.iteritems():
+                logger.debug("     :%s -> %s", k, json.dumps(unmunchify(v), indent=2))
+        else:
+            logger.debug("------>%s", json.dumps(unmunchify(result), indent=2))
+
+
+def print_snapshots_status(args, status_dict):
+    for key, label in LABEL_DICT.items():
+        logger.info("There are %s %s", len(status_dict[key]), label)
+    if args.print_all:
+        print_all_snapshots(status_dict)
 
 
 def _is_mounted(vpsa_nfs_share):
@@ -680,6 +713,8 @@ def add_remote_metadata_status_for_external_endpoint(args, client, label, status
     # list all snapshots metadata from mount
     file_count = 0
     count = 0
+    status_dict[VM_SNAPSHOTS_WITH_DELETED_SNAPSHOT_METADATA] = OrderedDict()
+    status_dict[VM_SNAPSHOTS_WITH_LIVE_SNAPSHOT_METADATA] = OrderedDict()
     for root, dir_names, file_names in os.walk(mount_point):
         file_count += 1
         if file_count % 1000 == 0:
@@ -716,12 +751,22 @@ def add_remote_metadata_status_for_external_endpoint(args, client, label, status
             elif entity_id in status_dict[ALL_VMS]:
                 snapshot_type = 'vm-snapshot'
             # Create metadata record
+            local_snapshot_id = None
+            managing_resource_type = None
+            try:
+                usermeta = json.loads(metadata.get('UserMeta', '{}'))
+                local_snapshot_id = usermeta.get('ManagingResourceID')
+                managing_resource_type = usermeta.get('ManagingResourceType')
+            except Exception:
+                pass
             remote_snapshot_data = {
                 "project_id": project_id,
                 "entity_id": entity_id,
                 "external_endpoint_id": external_endpoint_id,
                 "local_volume_snapshot_id": local_volume_snapshot_id,
                 "remote_volume_snapshot_id": remote_volume_snapshot_id,
+                "local_snapshot_id": local_snapshot_id,
+                "managing_resource_type": managing_resource_type,
                 "snapshot_type": snapshot_type,
                 "metadata": metadata,
                 "deleted": deleted,
@@ -736,6 +781,12 @@ def add_remote_metadata_status_for_external_endpoint(args, client, label, status
             elif snapshot_type == 'vm-snapshot':
                 status_dict[METADATA_REMOTE_VM_SNAPSHOTS][remote_volume_snapshot_id] = remote_snapshot_data
 
+            if local_snapshot_id and managing_resource_type == 'vm_snapshot':  # for now we don't care for standalone volumes
+                remote_vm_snapshot = status_dict[ALL_VM_REMOTE_SNAPSHOTS].get(local_snapshot_id)
+                if deleted:
+                    status_dict[VM_SNAPSHOTS_WITH_DELETED_SNAPSHOT_METADATA][local_snapshot_id] = remote_vm_snapshot
+                else:
+                    status_dict[VM_SNAPSHOTS_WITH_LIVE_SNAPSHOT_METADATA][local_snapshot_id] = remote_vm_snapshot
             if deleted:
                 status_dict[DELETED_METADATA_REMOTE_SNAPSHOTS][remote_volume_snapshot_id] = remote_snapshot_data
                 if local_volume_snapshot_exists:
@@ -757,8 +808,42 @@ def add_remote_metadata_status_for_external_endpoint(args, client, label, status
                         status_dict[LIVE_METADATA_REMOTE_WITH_LOCAL_API_OTHER][remote_volume_snapshot_id] = remote_snapshot_data
                 else:
                     status_dict[LIVE_METADATA_REMOTE_NO_LOCAL_API][remote_volume_snapshot_id] = remote_snapshot_data
-            # check for missing metadata for remote_snapshots
+
+    # Analyze VALID Remote VM snapshtos into ALL_VM_REMOTE_SNAPSHOTS_VALID
+    # Valid Remote VM snapshot = All remote volumes snapshots available - metadata available and not deleted
+    volume_remote_snapshots_by_remote_snapshot_metadata = defaultdict(dict)
+    for remote_volume_snapshot_id, remote_volume_snapshot_data in status_dict[ALL_VOLUME_REMOTE_SNAPSHOTS].iteritems():
+        remote_vm_snapshot_id = remote_volume_snapshot_data.get('managing_resource_id')
+        if not remote_vm_snapshot_id:
+            continue
+        remote_snapshot_metadata = status_dict[METADATA_REMOTE_SNAPSHOTS].get(remote_volume_snapshot_id)
+        if not remote_snapshot_metadata:
+            continue
+        data = {
+            "state": remote_volume_snapshot_data['state']
+        }
+        if remote_snapshot_metadata:
+            data['metadata_deleted'] = remote_snapshot_metadata['deleted']
+        volume_remote_snapshots_by_remote_snapshot_metadata[remote_vm_snapshot_id][remote_volume_snapshot_id] = data
+    for remote_vm_snapshot_id, vm_data in volume_remote_snapshots_by_remote_snapshot_metadata.iteritems():
+        valid = True
+        valid_deleted = False
+        for remote_volume_snapshot_id, volume_data in vm_data.items():
+            if volume_data['state'] == 'ready':
+                if volume_data['metadata_deleted']:
+                    valid_deleted = True
+            else:
+                if volume_data['state'] != 'ready' or volume_data['metadata_deleted']:
+                    valid = False
+        if valid:
+            status_dict[ALL_VM_REMOTE_SNAPSHOTS_VALID][remote_vm_snapshot_id] = vm_data
+        else:
+            status_dict[ALL_VM_REMOTE_SNAPSHOTS_INVALID][remote_vm_snapshot_id] = vm_data
+        if valid_deleted:
+            status_dict[ALL_VM_REMOTE_SNAPSHOTS_VALID_DELETED][remote_vm_snapshot_id] = vm_data
+
     _unmount_vpsa_nfs_share(mount_point)
+    # check for missing metadata for remote_snapshots
     for local_api_remote_snapshot in status_dict[ALL_VOLUME_REMOTE_SNAPSHOTS].values():
         if local_api_remote_snapshot.external_endpoint_id == external_endpoint_id:
             if local_api_remote_snapshot.state == 'ready':
@@ -778,10 +863,24 @@ def add_remote_metadata_status_for_all_vpsa_external_endpoint(args, client, labe
             add_remote_metadata_status_for_external_endpoint(args, client, label, status_dict, external_endpoint.id)
 
 
+def purge_remote_metadata_status_for_all_vpsa_external_endpoints(args, client, label, status_dict):
+    logger.info(label)
+    external_endpoints = client.externalendpoints.list()
+    status_dict[ALL_EXTERNAL_ENDPOINTS] = OrderedDict({ee.id: ee for ee in external_endpoints})
+    for external_endpoint in external_endpoints:
+        if external_endpoint.endpoint_type == 'vpsa_backup':
+            label = "Purging remote metadata marked as deleted and without local API remote-snapshots: {} ({})".format(
+                external_endpoint.id, external_endpoint.name
+            )
+            purge_remote_metadata_status_for_external_endpoint(args, client, label, status_dict, external_endpoint.id)
+
+
 def purge_remote_metadata_status_for_external_endpoint(args, client, label, status_dict, external_endpoint_id):
     logger.info(label)
-    logger.info("Going to delete %s metadata objects for remote snapshots", len(status_dict[DELETED_METADATA_NO_LOCAL_REMOTE_SNAPSHOTS]))
+    logger.info("Going to delete %s metadata objects for remote snapshots for %s",
+                len(status_dict[DELETED_METADATA_NO_LOCAL_REMOTE_SNAPSHOTS]), external_endpoint_id)
     if not are_you_sure(args):
+        logger.info("User requested to skip")
         sys.exit(0)
     mount_point = _mount_vpsa_external_endpoint(client, external_endpoint_id)
     count = 0
@@ -862,6 +961,9 @@ def parse_arguments():
                         default=False, required=False)
     parser.add_argument("--mfa", action='store_true', help="Ask for MFA code",
                         default=False, required=False)
+    parser.add_argument('--internal', help="Use internal token - only available when running inside a cluster "
+                                           "(disable all other login config)",
+                        action='store_true', default=False, required=False)
     parser.add_argument('--online-config', help="Read login parameters interactively",
                         action='store_true', default=False, required=False)
     parser.add_argument('--temp-token', help="Do not write login token to env file",
@@ -884,22 +986,49 @@ def parse_arguments():
     return parser.parse_args()
 
 
+def _check_inspector_worker_service_running():
+    logger.info("Checking for inspector-worker service")
+    try:
+        subprocess.check_call(['systemctl', 'is-active', 'inspector-worker'])
+    except subprocess.CalledProcessError:
+        logger.info("inspector-worker not currently running on this node skipping run")
+        sys.exit(0)
+    logger.info("inspector-worker currently running on this node, continue")
+
+
+def set_internal_config(args):
+    args.overwrite_config = False
+    args.write_config = False
+    args.online_config = False
+    args.token = None
+    args.verify = False
+    args.answer_yes = True
+    Config.CLUSTER_IP = "127.0.0.1"
+    Config.LOGIN_ACCOUNT = "cloud_admin"
+    Config.LOGIN_PROJECT_NAME = "default"
+    Config.LOGIN_USERNAME = "snapshot-cleanup"
+
+
 def main():
-    """ This is executed when run from the command line """
     args = parse_arguments()
-    init_logger()
+    init_logger(args)
     get_to_ipdb(args.ipdb)
+    if args.internal:
+        _check_inspector_worker_service_running()
 
-    if args.overwrite_config:
-        args.write_config = True
-    elif args.write_config:
-        if os.path.exists('env'):
-            msg = "File 'env' already exists in local directory, refusing to overwrite"
-            logger.error(msg)
-            sys.exit(msg)
+    if args.internal:
+        set_internal_config(args)
+    else:
+        if args.overwrite_config:
+            args.write_config = True
+        elif args.write_config:
+            if os.path.exists('env'):
+                msg = "File 'env' already exists in local directory, refusing to overwrite"
+                logger.error(msg)
+                sys.exit(msg)
 
-    if args.online_config:
-        load_config(args)
+        if args.online_config:
+            load_config(args)
 
     client = init_symp_client(args)
 
@@ -921,9 +1050,7 @@ def main():
     for volume_id in status_dict[PROTECTED_VOLUMES]:
         logger.info("Protecting volumes %s/%s", volume_id, all_volumes.get(volume_id, {}).get('name', 'unknown'))
     if args.op == 'snapshots-status':
-        print_snapshots_status(status_dict)
-        if args.print_all:
-            print_all_snapshots(status_dict)
+        print_snapshots_status(args, status_dict)
         sys.exit(0)
     if args.dry_run:
         logger.info("Running in dry-run mode")
@@ -933,14 +1060,14 @@ def main():
             sys.exit(0)
 
     if args.op == 'clean-snapshots-in-error':
-        print_snapshots_status(status_dict)
+        print_snapshots_status(args, status_dict)
         label = "Going to delete VM Snapshots in error: {}".format(len(status_dict[ERROR_VM_SNAPSHOTS]))
         clean_vm_snapshots(args, client, label, status_dict[ERROR_VM_SNAPSHOTS], all_vms)
         label = "Going to delete Volume Snapshots in error: {}".format(len(status_dict[ERROR_VOLUME_SNAPSHOTS]))
         clean_volume_snapshots(args, client, label, status_dict[ERROR_VOLUME_SNAPSHOTS], all_volumes)
         sys.exit(0)
     elif args.op == 'purge-auto-snapshots':
-        print_snapshots_status(status_dict)
+        print_snapshots_status(args, status_dict)
         label = "Going to delete Auto generated VM Snapshots older than {} days: {}".format(
             args.retention_days, len(status_dict[OLD_AUTO_VM_SNAPSHOTS])
         )
@@ -951,7 +1078,7 @@ def main():
         clean_volume_snapshots(args, client, label, status_dict[OLD_AUTO_VOLUME_SNAPSHOTS], all_volumes)
         sys.exit(0)
     elif args.op == 'purge-manual-snapshots':
-        print_snapshots_status(status_dict)
+        print_snapshots_status(args, status_dict)
         label = "Going to delete manual VM Snapshots older than {} days: {}".format(
             args.retention_days, len(status_dict[OLD_MANUAL_VM_SNAPSHOTS])
         )
@@ -962,7 +1089,7 @@ def main():
         clean_volume_snapshots(args, client, label, status_dict[OLD_MANUAL_VOLUME_SNAPSHOTS], all_volumes)
         sys.exit(0)
     elif args.op == 'purge-all-snapshots':
-        print_snapshots_status(status_dict)
+        print_snapshots_status(args, status_dict)
         label = "Going to delete all VM Snapshots older than {} days: {}".format(
             args.retention_days, len(status_dict[OLD_VM_SNAPSHOTS])
         )
@@ -979,18 +1106,22 @@ def main():
         else:
             label = "Analyzing remote metadata status for external endpoint: {}".format(args.external_endpoint)
             add_remote_metadata_status_for_external_endpoint(args, client, label, status_dict, args.external_endpoint)
-        print_snapshots_status(status_dict)
+        print_snapshots_status(args, status_dict)
         sys.exit(0)
     elif args.op == 'purge-remote-metadata':
         if args.external_endpoint == 'all':
             label = "Analyzing remote metadata status for external endpoints"
             add_remote_metadata_status_for_all_vpsa_external_endpoint(args, client, label, status_dict)
-            print_snapshots_status(status_dict)
+            print_snapshots_status(args, status_dict)
+            label = "Purging remote metadata marked as deleted and without local API remote-snapshots for all endpoint"
+            purge_remote_metadata_status_for_all_vpsa_external_endpoints(args, client, label, status_dict)
         else:
             label = "Analyzing remote metadata status for external endpoint: {}".format(args.external_endpoint)
             add_remote_metadata_status_for_external_endpoint(args, client, label, status_dict, args.external_endpoint)
-            print_snapshots_status(status_dict)
-            label = "Purging remote metadata marked as deleted and without local API remote-snapshots"
+            print_snapshots_status(args, status_dict)
+            label = "Purging remote metadata marked as deleted and without local API remote-snapshots: {}".format(
+                args.external_endpoint
+            )
             purge_remote_metadata_status_for_external_endpoint(args, client, label, status_dict, args.external_endpoint)
         sys.exit(0)
     else:
@@ -999,4 +1130,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except requests.HTTPError as ex:
+        if ex.response.text:
+            print(ex.response.text)
+        raise
